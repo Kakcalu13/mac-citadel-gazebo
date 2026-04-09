@@ -554,8 +554,8 @@ void TriggeredPublisher::Configure(const Entity &,
       info.msgData = msgs::Factory::New(info.msgType, msgStr);
       if (nullptr != info.msgData)
       {
-        info.pub =
-            this->node.Advertise(info.topic, info.msgData->GetTypeName());
+        const std::string outTopic(info.topic.data(), info.topic.size());
+        info.pub = this->node.Advertise(outTopic, info.msgData->GetTypeName());
         if (info.pub.Valid())
         {
           this->outputInfo.push_back(std::move(info));

@@ -48,6 +48,8 @@
 #include <sdf/Visual.hh>
 #include <sdf/World.hh>
 
+#include <gz/sim/components/World.hh>
+#include <gz/sim/EntityComponentManager.hh>
 #include "gz/sim/components/Geometry.hh"
 #include "gz/sim/components/Light.hh"
 #include "gz/sim/components/Link.hh"
@@ -60,6 +62,7 @@
 #include "gz/sim/components/World.hh"
 
 #include "gz/sim/Util.hh"
+
 
 using namespace gz;
 using namespace ignition::gazebo::systems;
@@ -282,12 +285,13 @@ bool LogRecordPrivate::Start(const std::string &_logPath,
   }
 
   // Use directory basename as topic name, to be able to retrieve at playback
-  std::string sdfTopic = "/" + common::basename(this->logPath) + "/sdf";
-  this->sdfPub = this->node.Advertise(sdfTopic, this->sdfMsg.GetTypeName());
+  std::string sdfTopicStr = "/" + common::basename(this->logPath) + "/sdf";
+  this->sdfPub = this->node.Advertise(sdfTopicStr, this->sdfMsg.GetTypeName());
 
   // TODO(louise) Combine with SceneBroadcaster's state topic
   std::string stateTopic = "/world/" + this->worldName + "/changed_state";
-  this->statePub = this->node.Advertise<msgs::SerializedStateMap>(stateTopic);
+  const std::string stateTopicStr(stateTopic);
+  this->statePub = this->node.Advertise<msgs::SerializedStateMap>(stateTopicStr);
 
   // Append file name
   std::string dbPath = common::joinPaths(this->logPath, "state.tlog");
@@ -303,10 +307,10 @@ bool LogRecordPrivate::Start(const std::string &_logPath,
     "/dynamic_pose/info";
 
   igndbg << "Recording default topic[" << dynPoseTopic << "].\n";
-  igndbg << "Recording default topic[" << sdfTopic << "].\n";
+  igndbg << "Recording default topic[" << sdfTopicStr << "].\n";
   igndbg << "Recording default topic[" << stateTopic << "].\n";
   this->recorder.AddTopic(dynPoseTopic);
-  this->recorder.AddTopic(sdfTopic);
+  this->recorder.AddTopic(sdfTopicStr);
   this->recorder.AddTopic(stateTopic);
 
   // Get the topics to record, if any.
