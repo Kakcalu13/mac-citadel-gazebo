@@ -311,6 +311,15 @@ class Cmd
       opts.on('--version') do
         options['version'] = '1'
       end
+      # Internal flags used by spawn() re-invocation on macOS
+      opts.on('--_run_server') do
+        options['server'] = 1
+        options['wait_gui'] = 0
+      end
+      opts.on('--_run_gui') do
+        options['gui'] = 1
+        options['wait_gui'] = 0
+      end
 
     end # opt_parser do
 
@@ -450,36 +459,53 @@ has properly set the DYLD_LIBRARY_PATH environment variables."
         options['gui_config'] = "_playback_"
       end
 
-      # Neither the -s nor -g options were used, so run both the server
-      # and gui.
+      # Neither the -s nor -g options were used, so run both the server and gui.
+      # On macOS, Process.fork() is unsafe after Qt has been loaded (CoreFoundation
+      # restriction). Use Process.spawn() instead, which calls exec() internally.
       if options['server'] == 0 && options['gui'] == 0
 
-        if plugin.end_with? ".dylib"
-          puts "`ign gazebo` currently only works with the -s argument on macOS.
-See https://github.com/gazebosim/gz-sim/issues/44 for more info."
-          exit(-1)
-        end
+        # Build the base command to re-invoke this same Ruby script
+        thisScript = File.expand_path(__FILE__)
 
-        serverPid = Process.fork do
-          ENV['RMT_PORT'] = '1500'
-          Process.setpgid(0, 0)
-          Process.setproctitle('ign gazebo server')
-          Importer.runServer(parsed, options['iterations'], options['run'],
-            options['hz'], options['levels'], options['network_role'],
-            options['network_secondaries'], options['record'],
-            options['record-path'], options['record-resources'],
-            options['log-overwrite'], options['log-compress'],
-            options['playback'], options['physics_engine'],
-            options['render_engine_server'], options['render_engine_gui'],
-            options['file'], options['record-topics'].join(':'), options['wait_gui'])
-        end
+        serverArgs = [
+          RbConfig.ruby, thisScript, args[0],
+          '--_run_server',
+          '--iterations', options['iterations'].to_s,
+          '-z', options['hz'].to_s,
+          '--network-role', options['network_role'].to_s,
+          '--network-secondaries', options['network_secondaries'].to_s,
+          '--playback', options['playback'].to_s,
+          '--physics-engine', options['physics_engine'].to_s,
+        ]
+        serverArgs += ['--levels'] if options['levels'] == 1
+        serverArgs += ['--record'] if options['record'] == 1
+        serverArgs += ['--record-path', options['record-path']] if options['record-path'] != ''
+        serverArgs += ['--record-resources'] if options['record-resources'] == 1
+        serverArgs += ['--log-overwrite'] if options['log-overwrite'] == 1
+        serverArgs += ['--log-compress'] if options['log-compress'] == 1
+        serverArgs += ['-r'] if options['run'] == 1
+        serverArgs += ['-v', options['verbose']] if options['verbose']
+        serverArgs += [options['file']] if options['file'] != ''
 
-        guiPid = Process.fork do
-          ENV['RMT_PORT'] = '1501'
-          Process.setpgid(0, 0)
-          Process.setproctitle('ign gazebo gui')
-          Importer.runGui(options['gui_config'], options['file'], options['wait_gui'])
-        end
+        guiArgs = [
+          RbConfig.ruby, thisScript, args[0],
+          '--_run_gui',
+        ]
+        guiArgs += ['--gui-config', options['gui_config']] if options['gui_config'] != ''
+        guiArgs += ['-v', options['verbose']] if options['verbose']
+        guiArgs += [options['file']] if options['file'] != ''
+
+        serverPid = Process.spawn(
+          {'RMT_PORT' => '1500'},
+          *serverArgs,
+          pgroup: true
+        )
+
+        guiPid = Process.spawn(
+          {'RMT_PORT' => '1501'},
+          *guiArgs,
+          pgroup: true
+        )
 
         Signal.trap("INT") {
           self.killProcess(guiPid, "Ignition Gazebo GUI", 5.0)
@@ -507,17 +533,13 @@ See https://github.com/gazebosim/gz-sim/issues/44 for more info."
             options['playback'], options['physics_engine'],
             options['render_engine_server'], options['render_engine_gui'],
             options['file'], options['record-topics'].join(':'), options['wait_gui'])
-            # Otherwise run the gui
-      else options['gui']
-        if plugin.end_with? ".dylib"
-          puts "`ign gazebo` currently only works with the -s argument on macOS.
-See https://github.com/gazebosim/gz-sim/issues/44 for more info."
-          exit(-1)
-        end
 
+      # Otherwise run the gui only
+      else
         ENV['RMT_PORT'] = '1501'
         Importer.runGui(options['gui_config'], options['file'], options['wait_gui'])
       end
+
     end
   # execute
   end
