@@ -17,6 +17,8 @@
 
 #include "Scene3D.hh"
 
+#include <QImage>
+
 #include <algorithm>
 #include <cmath>
 #include <condition_variable>
@@ -1643,6 +1645,60 @@ void IgnRenderer::HandleMouseViewControl()
 }
 
 /////////////////////////////////////////////////
+QImage IgnRenderer::GetCpuFrame()
+{
+  if (!this->dataPtr->camera)
+  {
+    ignerr << "GetCpuFrame: no camera" << std::endl;
+    return QImage();
+  }
+
+  unsigned int w = this->dataPtr->camera->ImageWidth();
+  unsigned int h = this->dataPtr->camera->ImageHeight();
+  if (w == 0 || h == 0)
+  {
+    ignerr << "GetCpuFrame: camera size is 0 (" << w << "x" << h << ")"
+           << std::endl;
+    return QImage();
+  }
+
+  static int frameCount = 0;
+  ++frameCount;
+
+  if (this->dataPtr->cameraImage.Width() != w ||
+      this->dataPtr->cameraImage.Height() != h)
+  {
+    ignerr << "GetCpuFrame: (re)creating image " << w << "x" << h << std::endl;
+    this->dataPtr->cameraImage = this->dataPtr->camera->CreateImage();
+  }
+  this->dataPtr->camera->Copy(this->dataPtr->cameraImage);
+
+  unsigned char *data = this->dataPtr->cameraImage.Data<unsigned char>();
+  if (!data)
+  {
+    ignerr << "GetCpuFrame: image data is null after Copy()" << std::endl;
+    return QImage();
+  }
+
+  if (frameCount <= 5 || frameCount == 60 || frameCount == 120)
+  {
+    // Log pixel values so we know if we're getting non-black data.
+    ignerr << "GetCpuFrame frame " << frameCount << " " << w << "x" << h
+           << " px[0]=" << (int)data[0] << "," << (int)data[1] << ","
+           << (int)data[2]
+           << " px[center]="
+           << (int)data[(h/2 * w + w/2) * 3 + 0] << ","
+           << (int)data[(h/2 * w + w/2) * 3 + 1] << ","
+           << (int)data[(h/2 * w + w/2) * 3 + 2] << std::endl;
+  }
+
+  // PF_R8G8B8 produces 3 bytes/pixel (R,G,B). Use Format_RGB888.
+  // Deep-copy the buffer so the QImage outlives cameraImage.
+  return QImage(data, static_cast<int>(w), static_cast<int>(h),
+      QImage::Format_RGB888).copy();
+}
+
+/////////////////////////////////////////////////
 std::string IgnRenderer::Initialize()
 {
   if (this->initialized)
@@ -1663,6 +1719,10 @@ std::string IgnRenderer::Initialize()
   if (!scene)
     return "Failed to create a 3D scene.";
 
+  // Set background color before creating the camera so CreateRenderTexture()
+  // reads it correctly. The default is black; use a visible gray for testing.
+  scene->SetBackgroundColor(math::Color(0.3f, 0.3f, 0.3f, 1.0f));
+
   auto root = scene->RootVisual();
 
   // Camera
@@ -1673,6 +1733,8 @@ std::string IgnRenderer::Initialize()
   this->dataPtr->camera->SetImageHeight(this->textureSize.height());
   this->dataPtr->camera->SetAntiAliasing(8);
   this->dataPtr->camera->SetHFOV(M_PI * 0.5);
+  // Default pixel format PF_R8G8B8 is used; Ogre2 internally stores RGBA8_UNORM
+  // but Copy() strips the alpha channel so the Image buffer holds 3 bytes/pixel.
   // setting the size and calling PreRender should cause the render texture to
   //  be rebuilt
   this->dataPtr->camera->PreRender();
@@ -2106,7 +2168,22 @@ void RenderThread::RenderNext()
 
   this->ignRenderer.Render();
 
-  emit TextureReady(this->ignRenderer.textureId, this->ignRenderer.textureSize);
+  int texId = this->ignRenderer.textureId;
+  QImage cpuFrame;
+  if (texId == 0)
+  {
+    // Metal renderer: no GL texture ID. Copy rendered pixels to a QImage.
+    static bool firstFrame = true;
+    if (firstFrame) { firstFrame = false; ignerr << "RenderNext: texId==0, using CPU readback path" << std::endl; }
+    cpuFrame = this->ignRenderer.GetCpuFrame();
+  }
+  else
+  {
+    static bool firstGLFrame = true;
+    if (firstGLFrame) { firstGLFrame = false; ignerr << "RenderNext: texId=" << texId << " (GL texture path)" << std::endl; }
+  }
+
+  emit TextureReady(texId, this->ignRenderer.textureSize, cpuFrame);
 }
 
 /////////////////////////////////////////////////
@@ -2173,11 +2250,13 @@ TextureNode::~TextureNode()
 }
 
 /////////////////////////////////////////////////
-void TextureNode::NewTexture(int _id, const QSize &_size)
+void TextureNode::NewTexture(int _id, const QSize &_size, const QImage &_frame)
 {
   this->mutex.lock();
   this->id = _id;
   this->size = _size;
+  if (!_frame.isNull())
+    this->frame = _frame;
   this->mutex.unlock();
 
   // We cannot call QQuickWindow::update directly here, as this is only allowed
@@ -2191,8 +2270,11 @@ void TextureNode::PrepareNode()
   this->mutex.lock();
   int newId = this->id;
   QSize sz = this->size;
+  QImage newFrame = this->frame;
   this->id = 0;
+  this->frame = QImage();
   this->mutex.unlock();
+
   if (newId)
   {
     delete this->texture;
@@ -2213,14 +2295,32 @@ void TextureNode::PrepareNode()
 #ifndef _WIN32
 # pragma GCC diagnostic pop
 #endif
-
 #endif
     this->setTexture(this->texture);
-
     this->markDirty(DirtyMaterial);
-
-    // This will notify the rendering thread that the texture is now being
-    // rendered and it can start rendering to the other one.
+    emit TextureInUse();
+  }
+  else if (!newFrame.isNull())
+  {
+    // Metal renderer path: compose from CPU-readback QImage
+    static int qtFrameCount = 0;
+    ++qtFrameCount;
+    if (qtFrameCount <= 3 || qtFrameCount == 60)
+    {
+      ignerr << "PrepareNode: applying QImage " << newFrame.width()
+             << "x" << newFrame.height() << " frame " << qtFrameCount << std::endl;
+    }
+    delete this->texture;
+    this->texture = this->window->createTextureFromImage(
+        newFrame, QQuickWindow::TextureIsOpaque);
+    this->setTexture(this->texture);
+    this->markDirty(DirtyMaterial);
+    emit TextureInUse();
+  }
+  else
+  {
+    // No texture and no frame yet (renderer still warming up) — keep the loop
+    // alive by immediately signalling TextureInUse so RenderNext() is retried.
     emit TextureInUse();
   }
 }
@@ -2344,7 +2444,7 @@ QSGNode *RenderWindowItem::updatePaintNode(QSGNode *_node,
     // rendering thread.
 
     this->connect(this->dataPtr->renderThread, &RenderThread::TextureReady,
-        node, &TextureNode::NewTexture, Qt::DirectConnection);
+        node, &TextureNode::NewTexture, Qt::DirectConnection);  // NOLINT
     this->connect(node, &TextureNode::PendingNewTexture, this->window(),
         &QQuickWindow::update, Qt::QueuedConnection);
     this->connect(this->window(), &QQuickWindow::beforeRendering, node,
@@ -2641,6 +2741,17 @@ void Scene3D::Update(const UpdateInfo &_info,
     return;
 
   IGN_PROFILE("Scene3D::Update");
+  {
+    static int updateCount = 0;
+    ++updateCount;
+    if (updateCount <= 3 || updateCount == 60 || updateCount == 180)
+    {
+      ignerr << "Scene3D::Update #" << updateCount
+             << " worldName='" << this->dataPtr->worldName << "'"
+             << " ecmEntityCount=" << _ecm.EntityCount()
+             << "\n";
+    }
+  }
   auto renderWindow = this->PluginItem()->findChild<RenderWindowItem *>();
   if (this->dataPtr->worldName.empty())
   {
@@ -2666,8 +2777,13 @@ void Scene3D::Update(const UpdateInfo &_info,
     }
     else
     {
-      igndbg << "RenderEngineGuiPlugin component not found, "
-        "render engine won't be set from the ECM" << std::endl;
+      static bool warnedOnce = false;
+      if (!warnedOnce)
+      {
+        warnedOnce = true;
+        igndbg << "RenderEngineGuiPlugin component not found, "
+          "render engine won't be set from the ECM" << std::endl;
+      }
     }
   }
 
