@@ -342,7 +342,11 @@ void SceneBroadcaster::PostUpdate(const UpdateInfo &_info,
     {
       for (const auto &reqSrv : this->dataPtr->stateRequests)
       {
-        this->dataPtr->node->Request(reqSrv, this->dataPtr->stepMsg);
+        ignerr << "SceneBroadcaster: sending state to callback=" << reqSrv
+               << " entities=" << this->dataPtr->stepMsg.state().entities_size()
+               << "\n";
+        bool ok = this->dataPtr->node->Request(reqSrv, this->dataPtr->stepMsg);
+        ignerr << "SceneBroadcaster: node->Request(" << reqSrv << ") returned " << ok << "\n";
       }
       this->dataPtr->stateRequests.clear();
     }
@@ -591,6 +595,8 @@ bool SceneBroadcasterPrivate::SceneInfoService(msgs::Scene &_res)
 void SceneBroadcasterPrivate::StateAsyncService(
     const msgs::StringMsg &_req)
 {
+  ignerr << "SceneBroadcaster::StateAsyncService: got request, callback="
+         << _req.data() << "\n";
   std::unique_lock<std::mutex> lock(this->stateMutex);
   this->stateServiceRequest = true;
   this->stateRequests.insert(_req.data());
