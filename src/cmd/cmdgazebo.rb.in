@@ -470,13 +470,13 @@ has properly set the DYLD_LIBRARY_PATH environment variables."
         serverArgs = [
           RbConfig.ruby, thisScript, args[0],
           '--_run_server',
-          '--iterations', options['iterations'].to_s,
-          '-z', options['hz'].to_s,
-          '--network-role', options['network_role'].to_s,
-          '--network-secondaries', options['network_secondaries'].to_s,
-          '--playback', options['playback'].to_s,
-          '--physics-engine', options['physics_engine'].to_s,
         ]
+        serverArgs += ['--iterations', options['iterations'].to_s] if options['iterations'] != 0
+        serverArgs += ["-z#{options['hz']}"] if options['hz'] != -1
+        serverArgs += ['--network-role', options['network_role']] if options['network_role'] != ''
+        serverArgs += ['--network-secondaries', options['network_secondaries'].to_s] if options['network_secondaries'] != 0
+        serverArgs += ['--playback', options['playback']] if options['playback'] != ''
+        serverArgs += ['--physics-engine', options['physics_engine']] if options['physics_engine'] != ''
         serverArgs += ['--levels'] if options['levels'] == 1
         serverArgs += ['--record'] if options['record'] == 1
         serverArgs += ['--record-path', options['record-path']] if options['record-path'] != ''
@@ -544,4 +544,13 @@ has properly set the DYLD_LIBRARY_PATH environment variables."
   # execute
   end
 # class
+end
+
+# When this file is run directly as a subprocess (not required by ign),
+# there is no outer main entry point, so we must call execute here.
+# The macOS spawn() re-invocation (used instead of fork()) calls this
+# script directly via: ruby cmdgazebo3.rb gazebo --_run_server ...
+if File.expand_path(__FILE__) == File.expand_path($PROGRAM_NAME)
+  cmd = Cmd.new
+  cmd.execute(ARGV)
 end
