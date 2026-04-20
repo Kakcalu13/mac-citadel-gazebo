@@ -1662,13 +1662,9 @@ QImage IgnRenderer::GetCpuFrame()
     return QImage();
   }
 
-  static int frameCount = 0;
-  ++frameCount;
-
   if (this->dataPtr->cameraImage.Width() != w ||
       this->dataPtr->cameraImage.Height() != h)
   {
-    ignerr << "GetCpuFrame: (re)creating image " << w << "x" << h << std::endl;
     this->dataPtr->cameraImage = this->dataPtr->camera->CreateImage();
   }
   this->dataPtr->camera->Copy(this->dataPtr->cameraImage);
@@ -1678,18 +1674,6 @@ QImage IgnRenderer::GetCpuFrame()
   {
     ignerr << "GetCpuFrame: image data is null after Copy()" << std::endl;
     return QImage();
-  }
-
-  if (frameCount <= 5 || frameCount == 60 || frameCount == 120)
-  {
-    // Log pixel values so we know if we're getting non-black data.
-    ignerr << "GetCpuFrame frame " << frameCount << " " << w << "x" << h
-           << " px[0]=" << (int)data[0] << "," << (int)data[1] << ","
-           << (int)data[2]
-           << " px[center]="
-           << (int)data[(h/2 * w + w/2) * 3 + 0] << ","
-           << (int)data[(h/2 * w + w/2) * 3 + 1] << ","
-           << (int)data[(h/2 * w + w/2) * 3 + 2] << std::endl;
   }
 
   // PF_R8G8B8 produces 3 bytes/pixel (R,G,B). Use Format_RGB888.
@@ -2173,14 +2157,7 @@ void RenderThread::RenderNext()
   if (texId == 0)
   {
     // Metal renderer: no GL texture ID. Copy rendered pixels to a QImage.
-    static bool firstFrame = true;
-    if (firstFrame) { firstFrame = false; ignerr << "RenderNext: texId==0, using CPU readback path" << std::endl; }
     cpuFrame = this->ignRenderer.GetCpuFrame();
-  }
-  else
-  {
-    static bool firstGLFrame = true;
-    if (firstGLFrame) { firstGLFrame = false; ignerr << "RenderNext: texId=" << texId << " (GL texture path)" << std::endl; }
   }
 
   emit TextureReady(texId, this->ignRenderer.textureSize, cpuFrame);
@@ -2303,13 +2280,6 @@ void TextureNode::PrepareNode()
   else if (!newFrame.isNull())
   {
     // Metal renderer path: compose from CPU-readback QImage
-    static int qtFrameCount = 0;
-    ++qtFrameCount;
-    if (qtFrameCount <= 3 || qtFrameCount == 60)
-    {
-      ignerr << "PrepareNode: applying QImage " << newFrame.width()
-             << "x" << newFrame.height() << " frame " << qtFrameCount << std::endl;
-    }
     delete this->texture;
     this->texture = this->window->createTextureFromImage(
         newFrame, QQuickWindow::TextureIsOpaque);
@@ -2742,15 +2712,6 @@ void Scene3D::Update(const UpdateInfo &_info,
 
   IGN_PROFILE("Scene3D::Update");
   {
-    static int updateCount = 0;
-    ++updateCount;
-    if (updateCount <= 3 || updateCount == 60 || updateCount == 180)
-    {
-      ignerr << "Scene3D::Update #" << updateCount
-             << " worldName='" << this->dataPtr->worldName << "'"
-             << " ecmEntityCount=" << _ecm.EntityCount()
-             << "\n";
-    }
   }
   auto renderWindow = this->PluginItem()->findChild<RenderWindowItem *>();
   if (this->dataPtr->worldName.empty())
