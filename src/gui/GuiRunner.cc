@@ -83,12 +83,8 @@ void GuiRunner::RequestState()
   msgs::StringMsg req;
   req.set_data(reqSrv);
 
-  ignerr << "GuiRunner::RequestState: requesting " << this->stateTopic
-         << "_async, callback=" << reqSrv << "\n";
-
   // send async state request
-  bool ok = this->node.Request(this->stateTopic + "_async", req);
-  ignerr << "GuiRunner::RequestState: node.Request returned " << ok << "\n";
+  this->node.Request(this->stateTopic + "_async", req);
 }
 
 /////////////////////////////////////////////////
@@ -101,8 +97,6 @@ void GuiRunner::OnPluginAdded(const QString &)
 /////////////////////////////////////////////////
 void GuiRunner::OnStateAsyncService(const msgs::SerializedStepMap &_res)
 {
-  ignerr << "GuiRunner::OnStateAsyncService: received state, entities="
-         << _res.state().entities_size() << "\n";
   this->OnState(_res);
 
   // todo(anyone) store reqSrv string in a member variable and use it here
