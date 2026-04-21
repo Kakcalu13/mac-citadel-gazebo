@@ -317,20 +317,6 @@ std::unique_ptr<gz::gui::Application> createGui(
   std::string service;
   msgs::StringMsg_V worldsMsg;
 
-  if (hasSdfFile)
-  {
-    std::string sdfPath = _sdfFile;
-    std::string worldName = common::basename(sdfPath);
-
-    auto dotPos = worldName.rfind('.');
-    if (dotPos != std::string::npos)
-      worldName = worldName.substr(0, dotPos);
-
-    worldsMsg.add_data(worldName);
-    igndbg << "Using world [" << worldName << "] from SDF [" << sdfPath
-           << "]." << std::endl;
-  }
-  else
   {
     executed = false;
     result = false;
@@ -463,7 +449,9 @@ int runGui(int &_argc, char **_argv,
     // Run main window.
     // This blocks until the window is closed or we receive a SIGINT
     app->exec();
-    igndbg << "Shutting down ign-gazebo-gui" << std::endl;
+    // Release without destroying to avoid vtable-corruption crash in
+    // Ogre/Metal teardown on macOS during subprocess exit.
+    app.release();
     return 0;
   }
   else
