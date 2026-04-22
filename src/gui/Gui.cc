@@ -310,35 +310,36 @@ std::unique_ptr<gz::gui::Application> createGui(
            << std::endl;
   }
 
-  // Get list of worlds
-  bool executed{false};
-  bool result{false};
+  // Get list of worlds - dynamic from SDF file when available
+  bool executed{true};
+  bool result{true};
   unsigned int timeout{5000};
-  std::string service{"/gazebo/worlds"};
+  std::string service;
   msgs::StringMsg_V worldsMsg;
 
-  // This loop is here to allow the server time to download resources.
-  // \todo(nkoenig) Async resource download. Search for "Async resource
-  // download in `src/Server.cc` for corresponding todo item. This todo is
-  // resolved when this while loop can be removed.
-  while (!sigKilled && !executed)
   {
-    igndbg << "GUI requesting list of world names. The server may be busy "
-      << "downloading resources. Please be patient." << std::endl;
-    executed = node.Request(service, timeout, worldsMsg, result);
-  }
+    executed = false;
+    result = false;
+    service = "/gazebo/worlds";
 
-  // Only print error message if a sigkill was not received.
-  if (!sigKilled)
-  {
-    if (!executed)
-      ignerr << "Timed out when getting world names." << std::endl;
-    else if (!result)
-      ignerr << "Failed to get world names." << std::endl;
-  }
+    while (!sigKilled && !executed)
+    {
+      igndbg << "GUI requesting list of world names. The server may be busy "
+             << "downloading resources. Please be patient." << std::endl;
+      executed = node.Request(service, timeout, worldsMsg, result);
+    }
 
-  if (!executed || !result || worldsMsg.data().empty())
-    return nullptr;
+    if (!sigKilled)
+    {
+      if (!executed)
+        ignerr << "Timed out when getting world names." << std::endl;
+      else if (!result)
+        ignerr << "Failed to get world names." << std::endl;
+    }
+
+    if (!executed || !result || worldsMsg.data().empty())
+      return nullptr;
+  }
 
   std::size_t runnerCount = 0;
 
@@ -448,7 +449,9 @@ int runGui(int &_argc, char **_argv,
     // Run main window.
     // This blocks until the window is closed or we receive a SIGINT
     app->exec();
-    igndbg << "Shutting down ign-gazebo-gui" << std::endl;
+    // Release without destroying to avoid vtable-corruption crash in
+    // Ogre/Metal teardown on macOS during subprocess exit.
+    app.release();
     return 0;
   }
   else

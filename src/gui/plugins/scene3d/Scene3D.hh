@@ -234,6 +234,11 @@ inline namespace IGNITION_GAZEBO_VERSION_NAMESPACE {
     ///  \brief Main render function
     public: void Render();
 
+    /// \brief Copy the last rendered frame to a QImage (used with Metal
+    /// renderer which has no shareable GL texture ID).
+    /// \return RGBA8888 QImage, or null QImage on failure.
+    public: QImage GetCpuFrame();
+
     /// \brief Initialize the render engine
     /// \return Error message if initialization failed. If empty, no errors
     /// occurred.
@@ -542,9 +547,10 @@ inline namespace IGNITION_GAZEBO_VERSION_NAMESPACE {
 
     /// \brief Signal to indicate that a frame has been rendered and ready
     /// to be displayed
-    /// \param[in] _id GLuid of the opengl texture
+    /// \param[in] _id GLuid of the opengl texture (0 when using Metal/CPU path)
     /// \param[in] _size Size of the texture
-    signals: void TextureReady(int _id, const QSize &_size);
+    /// \param[in] _frame CPU image data used when _id is 0 (Metal renderer)
+    signals: void TextureReady(int _id, const QSize &_size, const QImage &_frame);
 
     /// \brief Set a callback to be called in case there are errors.
     /// \param[in] _cb Error callback
@@ -783,9 +789,11 @@ inline namespace IGNITION_GAZEBO_VERSION_NAMESPACE {
 
     /// \brief This function gets called on the FBO rendering thread and will
     ///  store the texture id and size and schedule an update on the window.
-    /// \param[in] _id OpenGL render texture Id
+    /// \param[in] _id OpenGL render texture Id (0 when using Metal/CPU path)
     /// \param[in] _size Texture size
-    public slots: void NewTexture(int _id, const QSize &_size);
+    /// \param[in] _frame CPU image used when _id is 0 (Metal renderer)
+    public slots: void NewTexture(int _id, const QSize &_size,
+                                  const QImage &_frame);
 
     /// \brief Before the scene graph starts to render, we update to the
     /// pending texture
@@ -799,11 +807,14 @@ inline namespace IGNITION_GAZEBO_VERSION_NAMESPACE {
     /// update
     signals: void PendingNewTexture();
 
-    /// \brief OpenGL texture id
+    /// \brief OpenGL texture id (0 when using Metal/CPU path)
     public: int id = 0;
 
     /// \brief Texture size
     public: QSize size = QSize(0, 0);
+
+    /// \brief CPU image frame used when id is 0 (Metal renderer)
+    public: QImage frame;
 
     /// \brief Mutex to protect the texture variables
     public: QMutex mutex;

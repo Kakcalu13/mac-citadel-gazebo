@@ -58,6 +58,11 @@ GuiRunner::GuiRunner(const std::string &_worldName)
 
   this->RequestState();
 
+  // Retry state request after 3 seconds in case the initial request raced
+  // against server startup (state_async service not yet advertised).
+  QTimer::singleShot(3000, this, &GuiRunner::RequestState);
+  QTimer::singleShot(6000, this, &GuiRunner::RequestState);
+
   // Periodically update the plugins
   QPointer<QTimer> timer = new QTimer(this);
   connect(timer, &QTimer::timeout, this, &GuiRunner::UpdatePlugins);

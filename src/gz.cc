@@ -21,6 +21,10 @@
 #include <string>
 #include <vector>
 
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+#endif
+
 #include <gz/common/Console.hh>
 #include <gz/common/Filesystem.hh>
 #include <gz/fuel_tools/FuelClient.hh>
@@ -404,8 +408,20 @@ extern "C" IGNITION_GAZEBO_VISIBLE int runServer(const char *_sdfString,
   // Create the Gazebo server
   gz::sim::Server server(serverConfig);
 
-  // Run the server
+#ifdef __APPLE__
+  // On macOS the sensor render thread calls dispatch_sync(main_queue) to
+  // create Metal windows on the main thread. If the main thread is blocked in
+  // a C++ loop (server.Run blocking), that dispatch never executes → deadlock.
+  // Fix: run the server in a background thread and drain the GCD main queue
+  // (via CFRunLoop) from the main thread while the server is running.
+  server.Run(false, _iterations, _run == 0);
+  while (server.Running())
+  {
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
+  }
+#else
   server.Run(true, _iterations, _run == 0);
+#endif
 
   igndbg << "Shutting down ign-gazebo-server" << std::endl;
   return 0;

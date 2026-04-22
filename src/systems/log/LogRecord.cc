@@ -286,7 +286,9 @@ bool LogRecordPrivate::Start(const std::string &_logPath,
 
   // Use directory basename as topic name, to be able to retrieve at playback
   std::string sdfTopicStr = "/" + common::basename(this->logPath) + "/sdf";
-  this->sdfPub = this->node.Advertise(std::string(std::string(sdfTopicStr)), this->sdfMsg.GetTypeName());
+  this->sdfPub = this->node.Advertise(
+    std::string(sdfTopicStr),
+    std::string(this->sdfMsg.GetTypeName()));
 
   // TODO(louise) Combine with SceneBroadcaster's state topic
   std::string stateTopic = "/world/" + this->worldName + "/changed_state";
