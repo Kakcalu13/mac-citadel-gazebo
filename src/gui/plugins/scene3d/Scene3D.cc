@@ -1677,8 +1677,17 @@ QImage IgnRenderer::GetCpuFrame()
   }
 
   // PF_R8G8B8 produces 3 bytes/pixel (R,G,B). Use Format_RGB888.
-  // Deep-copy the buffer so the QImage outlives cameraImage.
+  // IMPORTANT: Ogre Copy() writes packed rows (bytesPerLine = w * 3). Qt's
+  // default bytesPerLine for Format_RGB888 rounds up to 4-byte alignment,
+  // which shifts every row by 1 byte when width*3 is not a multiple of 4.
+  // That accumulated shift is what caused the startup "stripes + double
+  // camera view" until a window resize happened to land on a multiple-of-4
+  // width. Pass the packed stride explicitly so Qt reads the buffer exactly
+  // as Ogre wrote it.
+  //
+  // Deep-copy so the QImage outlives cameraImage.
   return QImage(data, static_cast<int>(w), static_cast<int>(h),
+      static_cast<qsizetype>(w) * 3,
       QImage::Format_RGB888).copy();
 }
 
@@ -2208,15 +2217,15 @@ void RenderThread::SizeChanged()
 TextureNode::TextureNode(QQuickWindow *_window)
     : window(_window)
 {
-  // Our texture node must have a texture, so use the default 0 texture.
-#if QT_VERSION < QT_VERSION_CHECK(5, 14, 0)
-  this->texture = this->window->createTextureFromId(0, QSize(1, 1));
-#else
-  void * nativeLayout;
-  this->texture = this->window->createTextureFromNativeObject(
-      QQuickWindow::NativeObjectTexture, &nativeLayout, 0, QSize(1, 1),
-      QQuickWindow::TextureIsOpaque);
-#endif
+  // Our texture node must have a valid texture before the first real frame
+  // arrives. Creating it from a 1x1 black QImage matches the CPU-readback path
+  // used for the actual frames (PrepareNode uses createTextureFromImage), and
+  // avoids the uninitialized-native-object UB that produced garbage stripes
+  // and a double-camera-view on startup until the window was resized.
+  QImage placeholder(1, 1, QImage::Format_RGB888);
+  placeholder.fill(Qt::black);
+  this->texture = this->window->createTextureFromImage(
+      placeholder, QQuickWindow::TextureIsOpaque);
   this->setTexture(this->texture);
 }
 

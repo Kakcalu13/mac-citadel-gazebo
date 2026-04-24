@@ -329,6 +329,11 @@ class Cmd
     filename = args.pop
     if filename and filename != 'gazebo'
       options['file'] = filename
+    else
+      # No world provided: default to empty.sdf, and restore the subcommand
+      # name to args so args[0] stays valid for later Process.spawn calls.
+      args.push(filename) if filename
+      options['file'] = 'empty.sdf'
     end
 
     options['command'] = args[0]
