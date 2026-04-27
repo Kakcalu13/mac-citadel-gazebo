@@ -1712,9 +1712,12 @@ std::string IgnRenderer::Initialize()
   if (!scene)
     return "Failed to create a 3D scene.";
 
-  // Set background color before creating the camera so CreateRenderTexture()
-  // reads it correctly. The default is black; use a visible gray for testing.
-  scene->SetBackgroundColor(math::Color(0.3f, 0.3f, 0.3f, 1.0f));
+  // Background color was applied by RenderUtil::Init() (above) from the SDF's
+  // <background_color> element via RenderUtil::SetBackgroundColor() — see
+  // RenderUtil.cc:1232-1236. Do not override it here; that hides per-world
+  // overrides from the SDF and forces every viewport to the same hardcoded
+  // value. (Earlier dev versions hardcoded 0.3,0.3,0.3 here as a debug aid;
+  // that hardcode masked the SDF chain entirely.)
 
   auto root = scene->RootVisual();
 
