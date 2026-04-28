@@ -1327,14 +1327,17 @@ void IgnRenderer::HandleMouseTransformControl()
     {
       this->dataPtr->mousePressPos = this->dataPtr->mouseEvent.Pos();
 
-      // Pick the gizmo arrow under the cursor via a direct ray query
-      // against scene geometry, instead of camera->VisualAt() (the 1x1
-      // selection-buffer pick). The selection buffer's color-coded
-      // entity ID render is overridden by Visual::SetMaterial re-binding
-      // inside the gizmo's _updateRenderQueue, so the readback never
-      // returns the gizmo arrow's color and the axis grab silently fails.
-      // Ray query bypasses that whole pipeline — it hits the closest
-      // geometry directly using the actual world-space arrow meshes.
+      // Pick the gizmo arrow under the cursor. The selection-buffer
+      // approach (camera->VisualAt) doesn't work here because the gizmo's
+      // Visual::SetMaterial re-binds the arrow's datablock during
+      // _updateRenderQueue, clobbering the materialSwitcher's color-coded
+      // ID inside the selection workspace. Use a ray query instead.
+      //
+      // First, give the gizmo pick priority via AxisVisualByRay so that
+      // gizmo arrows are reachable even when occluded by other geometry
+      // (e.g. a Y arrow that ended up under the ground plane after a
+      // physics fall). Only if the ray misses every visible gizmo
+      // handle do we fall back to a general scene ray query.
       rendering::VisualPtr visual;
       auto rayQuery = this->dataPtr->camera->Scene()->CreateRayQuery();
       if (rayQuery)
@@ -1346,10 +1349,22 @@ void IgnRenderer::HandleMouseTransformControl()
             2.0 * static_cast<double>(pp.X()) / static_cast<double>(w) - 1.0,
             1.0 - 2.0 * static_cast<double>(pp.Y()) / static_cast<double>(h));
         rayQuery->SetFromCamera(this->dataPtr->camera, nd);
-        auto result = rayQuery->ClosestPoint();
-        if (result)
+
+        const unsigned int axisId =
+            this->dataPtr->transformControl.AxisVisualByRay(
+                rayQuery->Origin(), rayQuery->Direction());
+        if (axisId != 0u)
         {
-          visual = this->dataPtr->camera->Scene()->VisualById(result.objectId);
+          visual = this->dataPtr->camera->Scene()->VisualById(axisId);
+        }
+        else
+        {
+          auto result = rayQuery->ClosestPoint();
+          if (result)
+          {
+            visual =
+                this->dataPtr->camera->Scene()->VisualById(result.objectId);
+          }
         }
       }
 
