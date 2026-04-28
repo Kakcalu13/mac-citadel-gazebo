@@ -1326,9 +1326,32 @@ void IgnRenderer::HandleMouseTransformControl()
         && this->dataPtr->transformControl.Node())
     {
       this->dataPtr->mousePressPos = this->dataPtr->mouseEvent.Pos();
-      // get the visual at mouse position
-      rendering::VisualPtr visual = this->dataPtr->camera->VisualAt(
-            this->dataPtr->mouseEvent.PressPos());
+
+      // Pick the gizmo arrow under the cursor via a direct ray query
+      // against scene geometry, instead of camera->VisualAt() (the 1x1
+      // selection-buffer pick). The selection buffer's color-coded
+      // entity ID render is overridden by Visual::SetMaterial re-binding
+      // inside the gizmo's _updateRenderQueue, so the readback never
+      // returns the gizmo arrow's color and the axis grab silently fails.
+      // Ray query bypasses that whole pipeline — it hits the closest
+      // geometry directly using the actual world-space arrow meshes.
+      rendering::VisualPtr visual;
+      auto rayQuery = this->dataPtr->camera->Scene()->CreateRayQuery();
+      if (rayQuery)
+      {
+        const auto pp = this->dataPtr->mouseEvent.PressPos();
+        const unsigned int w = this->dataPtr->camera->ImageWidth();
+        const unsigned int h = this->dataPtr->camera->ImageHeight();
+        math::Vector2d nd(
+            2.0 * static_cast<double>(pp.X()) / static_cast<double>(w) - 1.0,
+            1.0 - 2.0 * static_cast<double>(pp.Y()) / static_cast<double>(h));
+        rayQuery->SetFromCamera(this->dataPtr->camera, nd);
+        auto result = rayQuery->ClosestPoint();
+        if (result)
+        {
+          visual = this->dataPtr->camera->Scene()->VisualById(result.objectId);
+        }
+      }
 
       if (visual)
       {
