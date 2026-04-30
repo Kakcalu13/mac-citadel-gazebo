@@ -1326,9 +1326,47 @@ void IgnRenderer::HandleMouseTransformControl()
         && this->dataPtr->transformControl.Node())
     {
       this->dataPtr->mousePressPos = this->dataPtr->mouseEvent.Pos();
-      // get the visual at mouse position
-      rendering::VisualPtr visual = this->dataPtr->camera->VisualAt(
-            this->dataPtr->mouseEvent.PressPos());
+
+      // Pick the gizmo arrow under the cursor. The selection-buffer
+      // approach (camera->VisualAt) doesn't work here because the gizmo's
+      // Visual::SetMaterial re-binds the arrow's datablock during
+      // _updateRenderQueue, clobbering the materialSwitcher's color-coded
+      // ID inside the selection workspace. Use a ray query instead.
+      //
+      // First, give the gizmo pick priority via AxisVisualByRay so that
+      // gizmo arrows are reachable even when occluded by other geometry
+      // (e.g. a Y arrow that ended up under the ground plane after a
+      // physics fall). Only if the ray misses every visible gizmo
+      // handle do we fall back to a general scene ray query.
+      rendering::VisualPtr visual;
+      auto rayQuery = this->dataPtr->camera->Scene()->CreateRayQuery();
+      if (rayQuery)
+      {
+        const auto pp = this->dataPtr->mouseEvent.PressPos();
+        const unsigned int w = this->dataPtr->camera->ImageWidth();
+        const unsigned int h = this->dataPtr->camera->ImageHeight();
+        math::Vector2d nd(
+            2.0 * static_cast<double>(pp.X()) / static_cast<double>(w) - 1.0,
+            1.0 - 2.0 * static_cast<double>(pp.Y()) / static_cast<double>(h));
+        rayQuery->SetFromCamera(this->dataPtr->camera, nd);
+
+        const unsigned int axisId =
+            this->dataPtr->transformControl.AxisVisualByRay(
+                rayQuery->Origin(), rayQuery->Direction());
+        if (axisId != 0u)
+        {
+          visual = this->dataPtr->camera->Scene()->VisualById(axisId);
+        }
+        else
+        {
+          auto result = rayQuery->ClosestPoint();
+          if (result)
+          {
+            visual =
+                this->dataPtr->camera->Scene()->VisualById(result.objectId);
+          }
+        }
+      }
 
       if (visual)
       {
